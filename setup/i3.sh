@@ -12,3 +12,9 @@ COMPOSITOR_PKGS=(
 )
 
 source "$S/lib/common.sh"
+
+step "Setting fcitx5 env" # unlike wayland, x11 has no compositor environment
+
+for kv in GTK_IM_MODULE=fcitx QT_IM_MODULE=fcitx XMODIFIERS=@im=fcitx SDL_IM_MODULE=fcitx; do
+    grep -qxF "$kv" /etc/environment || echo "$kv" | sudo tee -a /etc/environment >/dev/null
+done
