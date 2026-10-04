@@ -5,6 +5,9 @@ set -euo pipefail
     exit 1
 }
 
+read -rp "Install AUR packages? [Y/n] " ans
+[[ "$ans" =~ ^[Nn] ]] && aur="" || aur=AUR
+
 R="$(cd "$S/.." && pwd)"
 
 die() {
@@ -38,7 +41,7 @@ fi
 
 step "Installing packages + GPU drivers"
 pkgs=()
-for group in CORE SESSION COMPOSITOR AUDIO CONNECTIVITY INPUT FONT DESKTOP CLI DEV AUR; do
+for group in CORE SESSION COMPOSITOR AUDIO CONNECTIVITY INPUT FONT DESKTOP CLI DEV $aur; do
     ref="${group}_PKGS[@]"
     pkgs+=("${!ref}")
 done
