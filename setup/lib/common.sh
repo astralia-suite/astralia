@@ -61,6 +61,11 @@ sudo systemctl enable NetworkManager bluetooth
 systemctl --user enable pipewire pipewire-pulse wireplumber syncthing
 systemctl --user mask dunst.service 2>/dev/null || true
 
+step "Setting fcitx5 env"
+for kv in GTK_IM_MODULE=fcitx QT_IM_MODULE=fcitx XMODIFIERS=@im=fcitx INPUT_METHOD=fcitx SDL_IM_MODULE=fcitx; do
+    grep -qxF "$kv" /etc/environment || echo "$kv" | sudo tee -a /etc/environment >/dev/null
+done
+
 step "Installing GRUB"
 sudo mkdir -p /boot/grub
 if [[ -d /sys/firmware/efi ]]; then
