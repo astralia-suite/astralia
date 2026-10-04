@@ -104,7 +104,6 @@ return {
                                 keys = {
                                     ["<M-Left>"] = "explorer_close_all",
                                     ["<BS>"] = false,
-                                    ["<C-n>"] = "explorer_add",
                                     ["<C-b>"] = "close",
                                 },
                             },
