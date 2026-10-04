@@ -88,8 +88,10 @@ mkdir -p "${XDG_STATE_HOME:-$HOME/.local/state}/astralia"
 echo "$STOW_SESSION" >"${XDG_STATE_HOME:-$HOME/.local/state}/astralia/session"
 "$R/update" all
 
-step "Installing VS Code extensions"
-sed 's/^/--install-extension\n/' "$S/extensions.txt" | xargs -d '\n' code
+if command -v code &>/dev/null; then
+    step "Installing VS Code extensions"
+    sed 's/^/--install-extension\n/' "$S/extensions.txt" | xargs -d '\n' code
+fi
 
 step "Configuring git"
 git config --global pull.rebase true
