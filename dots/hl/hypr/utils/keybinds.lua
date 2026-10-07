@@ -48,7 +48,7 @@ return function(V, B, T, L, Anim)
         [mod("B")] = hl.dsp.exec_cmd(V.browser),
         [mod("C")] = hl.dsp.exec_cmd(V.editor),
         [mod("E")] = hl.dsp.exec_cmd(V.filemanager),
-        [mod("K", "s")] = hl.dsp.exec_cmd(V.editor),
+        [mod("K", "s")] = hl.dsp.exec_cmd(V.editor .. " " .. V.root),
         [mod("S", "s")] = hl.dsp.exec_cmd(V.screenshot),
         [mod("T")] = hl.dsp.exec_cmd(V.terminal),
     })

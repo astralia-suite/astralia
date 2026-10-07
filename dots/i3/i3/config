@@ -61,7 +61,7 @@ bindsym $mod+Tab exec $shell overview
 bindsym $mod+b exec $browser
 bindsym $mod+c exec $editor
 bindsym $mod+e exec $filemanager
-bindsym $mod+Shift+k exec $editor ~/astralia-suite
+bindsym $mod+Shift+k exec $editor ~/astralia-suite/astralia
 bindsym $mod+Shift+s exec --no-startup-id $screenshot
 bindsym $mod+t exec $term
 
