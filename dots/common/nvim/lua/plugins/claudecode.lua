@@ -14,7 +14,7 @@ end
 return {
     "coder/claudecode.nvim",
     keys = {
-        { "<C-A-c>", gated("ClaudeCodeFocus"), mode = { "n", "i", "t" }, desc = "Toggle/Focus Claude" },
+        { "<C-A-b>", gated("ClaudeCodeFocus"), mode = { "n", "i", "t" }, desc = "Toggle/Focus Claude" },
         { "<leader>af", gated("ClaudeCodeFocus"), desc = "Focus Claude" },
         { "<C-A-r>", gated("ClaudeCode --resume"), mode = { "n", "i", "t" }, desc = "Resume Claude" },
         { "<leader>aC", gated("ClaudeCode --continue"), desc = "Continue Claude" },
