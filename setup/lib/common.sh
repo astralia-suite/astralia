@@ -15,7 +15,7 @@ die() {
     exit 1
 }
 
-[[ "$(dirname "$R")" == "$HOME" ]] || die "Project must be cloned directly into \$HOME (found: $R)"
+[[ "$R" == "$HOME"/* ]] || die "Project must live under \$HOME (found: $R)"
 step() {
     echo
     echo "==> $*"

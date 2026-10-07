@@ -1,4 +1,0 @@
-#!/usr/bin/env bash
-
-[[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] && browser=zen-browser || browser=falkon
-exec "$browser" "$@"

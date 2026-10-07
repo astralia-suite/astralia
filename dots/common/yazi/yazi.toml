@@ -7,7 +7,7 @@ show_hidden = true
 image_bound = [10000, 10000]
 
 [opener]
-edit = [{ run = 'editor %s', orphan = true, for = "unix" }]
+edit = [{ run = 'astralia-open editor', orphan = true, for = "unix" }]
 astah = [{ run = 'astah-uml %s', desc = "Open in Astah", orphan = true }]
 drawio = [{ run = 'drawio %s', desc = "Open in Draw.io", orphan = true }]
 

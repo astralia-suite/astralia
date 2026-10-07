@@ -202,7 +202,6 @@ update_gtk() {
 }
 
 update_bin() { _link_all "$ROOT/scripts"; }
-update_apps() { _link_all "$ROOT/system/apps"; }
 
 update_symlinks() {
     local dirs=(/usr/bin /usr/local/bin /usr/share/applications "$HOME_T/.config" "$HOME_T/.zshrc" "$HOME_T/.gtkrc-2.0")
@@ -298,7 +297,7 @@ update_all() {
     norebuild=1 # one initramfs rebuild at the end
     arg=$(cat "$SESSION_FILE" 2>/dev/null || true)
     if [[ -n "$arg" ]]; then run stow; else echo "  -> stow skipped (no session in $SESSION_FILE; run a setup script)"; fi
-    for m in sudo font cursor gtk bin apps vscode yazi splash plymouth cmdline ramfs; do run "$m"; done
+    for m in sudo font cursor gtk bin vscode yazi splash plymouth cmdline ramfs; do run "$m"; done
 }
 
 run() {

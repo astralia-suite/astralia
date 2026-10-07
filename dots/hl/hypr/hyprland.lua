@@ -26,19 +26,19 @@ V.col = col
 V.home = os.getenv("HOME")
 
 -- Core
-V.root = V.home .. "/astralia"
+V.root = V.home .. "/astralia-suite/astralia"
 V.wpm = B.WPM
 
 -- Applications
-V.terminal = "terminal "
-V.browser = "browser "
-V.editor = "editor "
-V.filemanager = "file-manager "
+V.terminal = "astralia-open terminal "
+V.browser = "astralia-open browser "
+V.editor = "astralia-open editor "
+V.filemanager = "astralia-open file-manager "
 V.screenshot =
 	"bash -c 'mkdir -p $HOME/Pictures/screenshots/ && hyprshot --freeze -m region -o $HOME/Pictures/screenshots/'"
 
 -- Keqing-shell IPC Calls
-V.shell = "desktop-shell "
+V.shell = "astralia "
 
 -- =====================
 -- ENVIRONMENT VARIABLES

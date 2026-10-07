@@ -1,5 +1,5 @@
 # 1. ENVIRONMENT & PATH
-export ASTRALIA_ROOT="$HOME/astralia"
+export ASTRALIA_ROOT="$HOME/astralia-suite/astralia"
 export -U PATH="$HOME/.local/bin:$PATH"
 export CRYPTOGRAPHY_OPENSSL_NO_LEGACY=1
 CONDA_SRC="$HOME/miniconda3/etc/profile.d/conda.sh"
