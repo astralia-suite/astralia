@@ -186,7 +186,7 @@ hl.gesture({ fingers = 3, direction = "horizontal", action = "workspace" })
 -- ============
 for _, rule in ipairs({
 	{ match = { fullscreen = true }, border_color = V.col.accentAlt },
-	{ match = { float = true }, border_color = "#FFFFFF #FFFFFFAA" },
+	{ match = { float = true }, border_color = "#FFFFFF #FFFFFFAA", center = true },
 	{ match = { tag = "monocle" }, border_color = V.col.accentAlt .. "EE " .. V.col.accentAlt .. "AA" },
 	{ match = { class = "(?i).*cod(e|ium).*" }, opacity = "0.7" },
 }) do
