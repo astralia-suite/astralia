@@ -15,7 +15,7 @@ desc = "Toggle current panel"
 
 [[mgr.prepend_keymap]]
 on = "<A-c>"
-run = "shell 'exec astralia-open editor' --orphan"
+run = "shell 'exec astralia-open editor .' --orphan"
 desk = "Open current directory in VS Code"
 
 [[mgr.prepend_keymap]]
@@ -75,7 +75,7 @@ desc = "Move to bottom"
 
 [[mgr.prepend_keymap]]
 on = "<S-Right>"
-run = 'shell "cd \"$1\" && astralia-open file-manager" --orphan'
+run = 'shell "cd \"$1\" && astralia-open file-manager ." --orphan'
 desc = "Open directory in new window"
 
 [[mgr.prepend_keymap]]
