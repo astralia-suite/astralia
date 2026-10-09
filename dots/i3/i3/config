@@ -13,7 +13,7 @@ set $browser astralia-open browser
 set $editor astralia-open editor
 set $filemanager astralia-open file-manager
 set $screenshot bash -c 'mkdir -p $HOME/Pictures/screenshots/ && maim -s $HOME/Pictures/screenshots/$(date +%Y-%m-%d_%H-%M-%S).png'
-set $shell astralia-shell
+set $shell astralia
 
 # ===========
 # APPEARANCE
