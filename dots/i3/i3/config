@@ -51,8 +51,9 @@ bindsym $mod+v floating toggle
 # ASTRALIA
 # ===========
 bindsym Shift+space exec $shell launcher
-bindsym $mod+q exec $shell logout
 bindsym $mod+i exec $shell settings
+bindsym $mod+l exec $shell lock
+bindsym $mod+q exec $shell logout
 bindsym $mod+Tab exec $shell overview
 
 # ===========
