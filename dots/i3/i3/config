@@ -35,7 +35,7 @@ client.unfocused        #5E50A0  #5E50A0    #FFFFFF #5E50A0   #5E50A0
 # AUTOSTART
 # ===========
 exec --no-startup-id picom
-exec --no-startup-id astralia-shell
+exec --no-startup-id $shell
 exec --no-startup-id fcitx5 -d
 exec --no-startup-id dbus-update-activation-environment --systemd DISPLAY XDG_CURRENT_DESKTOP=i3
 
