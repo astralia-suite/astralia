@@ -42,7 +42,6 @@ exec --no-startup-id dbus-update-activation-environment --systemd DISPLAY XDG_CU
 # ===========
 # WINDOW STATE
 # ===========
-bindsym $mod+Shift+c reload
 bindsym $mod+Shift+r exec --no-startup-id "pkill -USR1 -x picom || picom -b", restart
 bindsym $mod+f fullscreen toggle
 bindsym $mod+v floating toggle
@@ -53,8 +52,11 @@ bindsym $mod+v floating toggle
 bindsym Shift+space exec $shell launcher
 bindsym $mod+i exec $shell settings
 bindsym $mod+l exec $shell lock
+bindsym $mod+m exec $shell rain
 bindsym $mod+q exec $shell logout
 bindsym $mod+Tab exec $shell overview
+bindsym $mod+Shift+c exec $shell dashboard
+bindsym $mod+Shift+v exec $shell visualizer
 
 # ===========
 # APPS

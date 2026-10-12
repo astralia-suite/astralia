@@ -7,15 +7,12 @@ return function(V, B, T, L, Anim)
     -- Shell
     B.binds({}, {
         [mod("A")] = Anim.toggle,
-        [mod("D")] = hl.dsp.exec_cmd(sh .. "dock"),
         [mod("I")] = hl.dsp.exec_cmd(sh .. "settings"),
         [mod("L")] = hl.dsp.exec_cmd(sh .. "lock"),
         [mod("M")] = hl.dsp.exec_cmd(sh .. "rain"),
         [mod("Q")] = hl.dsp.exec_cmd(sh .. "logout"),
         [mod("TAB")] = hl.dsp.exec_cmd(sh .. "overview"),
-        [mod("A", "s")] = hl.dsp.exec_cmd(sh .. "bar-all"),
         [mod("C", "s")] = hl.dsp.exec_cmd(sh .. "dashboard"),
-        [mod("D", "s")] = hl.dsp.exec_cmd(sh .. "dock-all"),
         [mod("V", "s")] = hl.dsp.exec_cmd(sh .. "visualizer"),
         ["SHIFT + SPACE"] = hl.dsp.exec_cmd(sh .. "launcher"),
     })
