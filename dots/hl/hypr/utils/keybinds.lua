@@ -9,12 +9,12 @@ return function(V, B, T, L, Anim)
         [mod("A")] = Anim.toggle,
         [mod("I")] = hl.dsp.exec_cmd(sh .. "settings"),
         [mod("L")] = hl.dsp.exec_cmd(sh .. "lock"),
-        [mod("M")] = hl.dsp.exec_cmd(sh .. "rain"),
         [mod("Q")] = hl.dsp.exec_cmd(sh .. "logout"),
         [mod("TAB")] = hl.dsp.exec_cmd(sh .. "overview"),
         [mod("C", "s")] = hl.dsp.exec_cmd(sh .. "dashboard"),
+        [mod("M", "s")] = hl.dsp.exec_cmd(sh .. "rain"),
         [mod("V", "s")] = hl.dsp.exec_cmd(sh .. "visualizer"),
-        ["SHIFT + SPACE"] = hl.dsp.exec_cmd(sh .. "launcher"),
+        [mod("SPACE")] = hl.dsp.exec_cmd(sh .. "launcher"),
     })
 
     -- Window states
