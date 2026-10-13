@@ -14,7 +14,7 @@ return function(V, B, T, L, Anim)
         [mod("C", "s")] = hl.dsp.exec_cmd(sh .. "dashboard"),
         [mod("M", "s")] = hl.dsp.exec_cmd(sh .. "rain"),
         [mod("V", "s")] = hl.dsp.exec_cmd(sh .. "visualizer"),
-        [mod("SPACE")] = hl.dsp.exec_cmd(sh .. "launcher"),
+        ["SHIFT + SPACE"] = hl.dsp.exec_cmd(sh .. "launcher"),
     })
 
     -- Window states
