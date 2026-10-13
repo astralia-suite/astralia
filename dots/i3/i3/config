@@ -1,8 +1,6 @@
 # I3 CONFIG
-# Translated from astralia/dots/hl/hypr. Per-window opacity, blur and rounding
-# are handled by picom (dots/i3/picom/picom.conf). Wayland-only options
-# (output scale, --locked binds, seat/input blocks) and the astralia
-# desktop-shell (wlr-layer-shell only) were dropped.
+
+exec_always --no-startup-id setxkbmap -option caps:super -option shift:both_capslock
 
 # ===========
 # VARIABLES
