@@ -1,7 +1,5 @@
 # I3 CONFIG
 
-exec_always --no-startup-id setxkbmap -option caps:super -option shift:both_capslock
-
 # ===========
 # VARIABLES
 # ===========
