@@ -45,6 +45,7 @@ FONT_PKGS=(
 DESKTOP_PKGS=(
     desktop-file-utils
     foot
+    gsettings-desktop-schemas
     imagemagick
     libnotify
     mpv
