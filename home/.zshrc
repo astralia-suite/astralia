@@ -63,7 +63,7 @@ _cached_init() {
 # 5. ALIASES
 alias grep="grep --color=auto"
 alias ls="ls --color=auto"
-alias search="noglob search"
+alias sc="noglob sc"
 
 # 6. EXTERNAL SOURCING
 for f in "$ASTRALIA_ROOT/shell/"*.sh(N); do source "$f"; done
