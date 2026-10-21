@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+shopt -s extglob
+q=${1##+([[:space:]])}
+q=${q%%+([[:space:]])}
+[[ -z $q ]] && { echo "usage: search <query>" >&2; exit 1; }
+command -v fd >/dev/null && command -v fzf >/dev/null || exit 1
+
+fzf() { command fzf --cycle "$@"; }
+
+args=(--glob --ignore-case --type d --hidden --no-ignore --absolute-path --color never)
+[[ $q == /* || $q == '**/'* || $q == */* ]] && args+=(--full-path)
+[[ $q == /* || $q == '**/'* ]] || { [[ $q == */* ]] && q="**/$q" || q="*$q*"; }
+
+dir=$(fd "${args[@]}" -- "$q" "$HOME" 2>/dev/null | fzf --select-1 --exit-0 --layout=reverse) || exit 1
+action=$(printf '%s\n' "open in terminal" "open in editor" | fzf --exit-0 --layout=reverse --prompt="${dir%/} > ") || exit 1
+[[ $action == *terminal ]] && { cd "$dir" && exec astralia-open terminal; } || exec astralia-open editor "$dir"

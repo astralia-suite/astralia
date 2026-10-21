@@ -45,21 +45,6 @@ EOF
 }
 greet() { [[ -z "$TERM_PROGRAM" && -z "$TERMINAL_EMULATOR" && -z "$NVIM" ]] && { message; fetch; }; }
 clear() { command clear 2>/dev/null || printf '\033[H\033[2J\033[3J'; greet; }
-_find() {
-  command -v fzf &>/dev/null || return 1
-  find "$HOME" -type d 2>/dev/null | awk -v s="/$1" 'substr($0,length($0)-length(s)+1)==s' | fzf --select-1 --exit-0 --layout=reverse
-}
-goto() {
-  [[ -z "$1" ]] && { echo "Usage: goto <path-suffix>"; return 1; }
-  local dir
-  dir=$(_find "$1") && cd "$dir"
-}
-edit() {
-  [[ -z "$1" ]] && { echo "Usage: edit <path-suffix>"; return 1; }
-  command -v code &>/dev/null || return 1
-  local dir
-  dir=$(_find "$1") && code "$dir"
-}
 clearpycache() { find . -type d -name "__pycache__" -exec rm -rf {} +; }
 own() { sudo chown -R $USER $1; }
 run() {
@@ -78,6 +63,7 @@ _cached_init() {
 # 5. ALIASES
 alias grep="grep --color=auto"
 alias ls="ls --color=auto"
+alias search="noglob search"
 
 # 6. EXTERNAL SOURCING
 for f in "$ASTRALIA_ROOT/shell/"*.sh(N); do source "$f"; done
