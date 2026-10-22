@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# noglob
 
 shopt -s extglob
 q=${1##+([[:space:]])}
