@@ -2,17 +2,88 @@
 # noglob
 
 shopt -s extglob
-q=${1##+([[:space:]])}
-q=${q%%+([[:space:]])}
-[[ -z $q ]] && { echo "usage: search <query>" >&2; exit 1; }
 command -v fd >/dev/null && command -v fzf >/dev/null || exit 1
 
 fzf() { command fzf --cycle "$@"; }
 
-args=(--glob --ignore-case --type d --hidden --no-ignore --absolute-path --color never)
-[[ $q == /* || $q == '**/'* || $q == */* ]] && args+=(--full-path)
-[[ $q == /* || $q == '**/'* ]] || { [[ $q == */* ]] && q="**/$q" || q="*$q*"; }
+trim() {
+  local s=${1##+([[:space:]])}
+  printf '%s' "${s%%+([[:space:]])}"
+}
 
-dir=$(fd "${args[@]}" -- "$q" "$HOME" 2>/dev/null | fzf --select-1 --exit-0 --layout=reverse) || exit 1
-action=$(printf '%s\n' "open in terminal" "open in editor" | fzf --exit-0 --layout=reverse --prompt="${dir%/} > ") || exit 1
-[[ $action == *terminal ]] && { cd "$dir" && exec astralia-open terminal; } || exec astralia-open editor "$dir"
+# find_paths <d|f> <query>: absolute matches under $HOME, dirs end in "/"
+find_paths() {
+  local q=$2
+  local args=(--glob --ignore-case --type "$1" --hidden --no-ignore --absolute-path --color never)
+  [[ $q == /* || $q == '**/'* || $q == */* ]] && args+=(--full-path)
+  [[ $q == /* || $q == '**/'* ]] || { [[ $q == */* ]] && q="**/$q" || q="*$q*"; }
+  if [[ $1 == d ]]; then
+    fd "${args[@]}" -- "$q" "$HOME" 2>/dev/null | sed 's|/*$|/|'
+  else
+    fd "${args[@]}" -- "$q" "$HOME" 2>/dev/null
+  fi
+}
+
+# internal: reload source for the live search
+if [[ $1 == --list ]]; then
+  q=$(trim "$2")
+  [[ -n $q ]] && { find_paths d "$q"; find_paths f "$q"; }
+  exit 0
+fi
+
+# live search: type to filter, prints the chosen path
+interactive() {
+  local self
+  self=$(readlink -f "$0")
+  printf '' | fzf --disabled --layout=reverse --prompt="search > " \
+    --bind "change:reload:'$self' --list {q} || true"
+}
+
+# browse <dir>: step through directories one level at a time, prints the chosen path
+browse() {
+  local d=${1%/} sel
+  [[ -z $d ]] && d=/
+  while :; do
+    sel=$({
+      printf '%s\n' "./" "../"
+      fd --max-depth 1 --hidden --no-ignore --color never --base-directory "$d" --type d
+      fd --max-depth 1 --hidden --no-ignore --color never --base-directory "$d" --type f
+    } | fzf --layout=reverse --prompt="${d%/}/ > ") || return 1
+    case $sel in
+      ./) printf '%s/\n' "${d%/}"; return ;;
+      ../) d=$(dirname "$d") ;;
+      */) d="${d%/}/${sel%/}" ;;
+      *) printf '%s/%s\n' "${d%/}" "$sel"; return ;;
+    esac
+  done
+}
+
+# act <path>: action menu by type
+act() {
+  local p=$1 dir action
+  if [[ -d $p ]]; then
+    dir=${p%/}
+    action=$(printf '%s\n' "open in terminal" "open in editor" |
+      fzf --exit-0 --layout=reverse --prompt="$dir > ") || exit 1
+  else
+    dir=$(dirname "$p")
+    action=$(printf '%s\n' "open in editor" "reveal in file manager" "open terminal here" |
+      fzf --exit-0 --layout=reverse --prompt="$p > ") || exit 1
+  fi
+  case $action in
+    *terminal*) cd "$dir" && exec astralia-open terminal ;;
+    *file\ manager) exec astralia-open file-manager "$p" ;;
+    *) exec astralia-open editor "${p%/}" ;;
+  esac
+}
+
+q=$(trim "$1")
+
+if [[ -z $q ]]; then
+  sel=$(interactive) || exit 1
+  [[ $sel == */ ]] && { sel=$(browse "$sel") || exit 1; }
+  act "$sel"
+fi
+
+dir=$(find_paths d "$q" | fzf --select-1 --exit-0 --layout=reverse) || exit 1
+act "$dir"
