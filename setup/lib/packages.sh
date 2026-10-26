@@ -59,6 +59,7 @@ CLI_PKGS=(
     brightnessctl
     btop
     chafa
+    ddcutil
     fastfetch
     fd
     fzf

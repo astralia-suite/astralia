@@ -74,7 +74,7 @@ return function(V, B, T, L, Anim)
     -- Workspace operations
     local ws = {}
     for i = 1, V.wpm do
-        local k = i % V.wpm
+        local k = i
         ws[mod(k)] = function()
             T.fw(i)
         end

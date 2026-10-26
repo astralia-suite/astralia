@@ -2,7 +2,7 @@
 
 local B = {}
 
-B.WPM = 10
+B.WPM = 5
 
 function B.binds(opts, map)
     for k, v in pairs(map) do
