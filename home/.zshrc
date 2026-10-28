@@ -30,7 +30,7 @@ precmd() {
 }
 fetch() { command -v fastfetch &>/dev/null && fastfetch; }
 message() {
-  printf '\e[38;2;155;87;244m'
+  printf '\e[35m'
   cat <<'EOF' | sed 's/^/      /'
 
     __ __                     _                  

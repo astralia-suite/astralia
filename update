@@ -292,12 +292,47 @@ update_yazi() {
     ya pkg upgrade --discard
 }
 
+update_zen() {
+    local ini="$HOME_T/.config/zen/installs.ini" rel prof chrome state f
+    [[ -f "$ini" ]] || {
+        echo "zen profile not found, skipping"
+        return 0
+    }
+    rel=$(ini_get "$ini" Default)
+    [[ -n "$rel" && -d "$HOME_T/.config/zen/$rel" ]] || {
+        echo "zen default profile not found, skipping"
+        return 0
+    }
+    prof="$HOME_T/.config/zen/$rel"
+    chrome="$prof/chrome"
+    state="${XDG_STATE_HOME:-$HOME_T/.local/state}/astralia/palette.css"
+    if ((remove)); then
+        for f in "$chrome/userChrome.css" "$chrome/astralia-palette.css" "$prof/user.js"; do
+            if [[ -L "$f" ]]; then
+                echo "removing $f"
+                rm -f "$f"
+            fi
+        done
+        return 0
+    fi
+    mkdir -p "$chrome"
+    for f in "$ROOT/dots/zen/userChrome.css:$chrome/userChrome.css" "$ROOT/dots/zen/user.js:$prof/user.js" \
+        "$state:$chrome/astralia-palette.css"; do
+        if [[ -e "${f#*:}" && ! -L "${f#*:}" ]]; then
+            echo "keeping existing ${f#*:}"
+        else
+            echo "linking ${f#*:}"
+            ln -sfn "${f%%:*}" "${f#*:}"
+        fi
+    done
+}
+
 update_all() {
     local m
     norebuild=1 # one initramfs rebuild at the end
     arg=$(cat "$SESSION_FILE" 2>/dev/null || true)
     if [[ -n "$arg" ]]; then run stow; else echo "  -> stow skipped (no session in $SESSION_FILE; run a setup script)"; fi
-    for m in sudo font cursor gtk bin vscode yazi splash plymouth cmdline ramfs; do run "$m"; done
+    for m in sudo font cursor gtk bin vscode yazi zen splash plymouth cmdline ramfs; do run "$m"; done
 }
 
 run() {
@@ -311,6 +346,7 @@ Usage: update <module> [arg] [--remove] [--no-rebuild]
 Modules: $(declare -F | sed -n 's/^declare -f update_//p' | tr '\n' ' ')
   stow hl|i3 [--remove]
   grub <WxH> | grub --remove
+  zen [--remove]   link the Zen userChrome.css, user.js and synced palette.css
   --no-rebuild   skip initramfs rebuild (font, splash, plymouth, cmdline)
 EOF
     exit "${1:-0}"
