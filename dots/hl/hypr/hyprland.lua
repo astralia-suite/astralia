@@ -34,8 +34,7 @@ V.terminal = "astralia-open terminal "
 V.browser = "astralia-open browser "
 V.editor = "astralia-open editor "
 V.filemanager = "astralia-open file-manager "
-V.screenshot =
-	"bash -c 'mkdir -p $HOME/Pictures/screenshots/ && hyprshot --freeze -m region -o $HOME/Pictures/screenshots/'"
+V.screenshot = "screenshot"
 
 -- Keqing-shell IPC Calls
 V.shell = "astralia "

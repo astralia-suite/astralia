@@ -6,7 +6,7 @@ STOW_SESSION=hl
 COMPOSITOR_PKGS=(
     grim
     hyprland
-    hyprshot
+    hyprpicker
     slurp
     wl-clipboard
     xdg-desktop-portal-hyprland

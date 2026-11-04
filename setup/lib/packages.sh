@@ -9,7 +9,6 @@ CORE_PKGS=(
 
 SESSION_PKGS=(
     plymouth
-    qt6-multimedia
     xdg-desktop-portal
     xdg-utils
 )
@@ -44,7 +43,6 @@ FONT_PKGS=(
 
 DESKTOP_PKGS=(
     desktop-file-utils
-    foot
     gsettings-desktop-schemas
     imagemagick
     libnotify
@@ -70,7 +68,6 @@ CLI_PKGS=(
     unzip
     xxhash
     yazi
-    yt-dlp
     zoxide
     zsh-autosuggestions
 )

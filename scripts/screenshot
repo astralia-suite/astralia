@@ -1,35 +1,45 @@
 #!/usr/bin/env bash
 
-# Freeze the screen, let the user select a region, save it to
-# ~/Pictures/screenshots/ (creating it if needed) and copy it to the
-# clipboard. Own wrapper around grim/slurp/hyprpicker instead of hyprshot
-# so freeze + save-to-folder + region-select stay one script, one keybind.
+# Freeze the screen, select a region, save it to ~/Pictures/screenshots and copy it.
+# Wayland: hyprpicker freezes, slurp selects, grim captures.
+# X11: maim captures, feh shows it (i3 makes it fullscreen global), slop selects, magick crops.
 
-for c in grim slurp hyprpicker wl-copy; do command -v "$c" &>/dev/null || exit 1; done
+[[ -n "$WAYLAND_DISPLAY" ]] && wl=true || wl=false
+$wl && deps=(grim slurp hyprpicker wl-copy) || deps=(maim slop feh magick xclip)
+for c in "${deps[@]}"; do command -v "$c" &>/dev/null || exit 1; done
 
 save_dir="$HOME/Pictures/screenshots"
 mkdir -p "$save_dir"
 save_path="$save_dir/$(date +'%Y-%m-%d-%H%M%S')_screenshot.png"
 
-hyprpicker -r -z &
-freeze_pid=$!
-sleep 0.2
+if $wl; then
+    hyprpicker -r -z &
+    freeze_pid=$!
+    sleep 0.2
+    # Escape closes hyprpicker; take slurp down with it (sibling, so poll instead of wait)
+    (
+        while kill -0 "$freeze_pid" 2>/dev/null; do sleep 0.1; done
+        pkill -x slurp
+    ) &
+    watcher_pid=$!
+    geometry=$(slurp)
+    kill "$freeze_pid" "$watcher_pid" 2>/dev/null
+    [[ -n "$geometry" ]] || exit 0
+    grim -g "$geometry" "$save_path"
+    wl-copy --type image/png <"$save_path"
+else
+    # tmpfs + fastest png compression: the frozen frame is throwaway, keep slow CPUs/disks out of the way
+    frozen=$(mktemp -p "${XDG_RUNTIME_DIR:-/tmp}" --suffix=.png)
+    trap 'rm -f "$frozen"' EXIT
+    maim -u -m 1 "$frozen"
+    feh -x --title screenshot-freeze "$frozen" &
+    freeze_pid=$!
+    sleep 0.2
+    geometry=$(slop -f '%g')
+    kill "$freeze_pid" 2>/dev/null
+    [[ -n "$geometry" ]] || exit 0
+    magick "$frozen" -crop "$geometry" +repage "$save_path"
+    xclip -selection clipboard -t image/png <"$save_path"
+fi
 
-# hyprpicker exits on its own Escape handler, unfreezing the background,
-# but slurp's dim overlay is a separate process still waiting on its own
-# Escape. Poll for hyprpicker dying and kill slurp too so one Escape
-# dismisses both (can't `wait` on it here, it's a sibling not a child).
-(
-    while kill -0 "$freeze_pid" 2>/dev/null; do sleep 0.1; done
-    pkill -x slurp
-) &
-watcher_pid=$!
-
-geometry=$(slurp)
-kill "$freeze_pid" "$watcher_pid" 2>/dev/null
-
-[ -n "$geometry" ] || exit 0
-
-grim -g "$geometry" "$save_path"
-wl-copy --type image/png <"$save_path"
 notify-send "Screenshot saved" "$save_path" -i "$save_path" -a screenshot-region
