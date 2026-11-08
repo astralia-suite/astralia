@@ -55,6 +55,8 @@ fi
 { $has_amd || $has_intel; } && pkgs+=(mesa)
 $has_amd && pkgs+=(vulkan-radeon libva-mesa-driver)
 $has_intel && pkgs+=(vulkan-intel intel-media-driver)
+_detect_cpu
+[[ -z "$cpu_ucode" ]] || pkgs+=("$cpu_ucode")
 $has_nvidia || $has_amd || $has_intel || echo "GPU not detected, skipping driver installation"
 
 paru -S --needed --noconfirm "${pkgs[@]}"
@@ -87,6 +89,11 @@ sudo ln -sf "$R/update" /usr/local/bin/update
 mkdir -p "${XDG_STATE_HOME:-$HOME/.local/state}/astralia"
 echo "$STOW_SESSION" >"${XDG_STATE_HOME:-$HOME/.local/state}/astralia/session"
 "$R/update" all
+
+if declare -f install_compositor >/dev/null; then
+    step "Installing compositor"
+    install_compositor
+fi
 
 if command -v code &>/dev/null; then
     step "Installing VS Code extensions"

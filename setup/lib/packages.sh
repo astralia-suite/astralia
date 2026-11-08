@@ -4,6 +4,7 @@ CORE_PKGS=(
     pciutils
     stow
     upower
+    zram-generator
     zsh
 )
 

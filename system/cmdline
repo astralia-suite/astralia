@@ -1,1 +1,1 @@
-rw rootfstype=ext4 zswap.enabled=0 quiet splash fbcon=nodefer
+rw zswap.enabled=0 quiet splash fbcon=nodefer

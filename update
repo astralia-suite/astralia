@@ -1,374 +1,599 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# update: sync astralia's system config and dotfiles onto this machine.
+# Every module is safe to re-run; it only touches what differs. See `update --help`.
+set -Eeuo pipefail
+
+# Config 
 
 ROOT="${ASTRALIA_ROOT:-$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)}"
-TARGET="${UPDATE_TARGET_ROOT:-/}"
-HOME_T="${STOW_TARGET:-$HOME}"
+TARGET="${UPDATE_TARGET_ROOT:-/}" # system files go under here (/ = the live system)
+HOME_T="${STOW_TARGET:-$HOME}"    # dotfiles go under here
 THEME="Keqing"
 THEMES="$ROOT/system/themes"
 SESSION_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/astralia/session"
 
+SESSIONS=(hl i3 sj)
+ALL_MODULES=(sudo font cursor gtk bin vscode yazi zen zram splash plymouth cmdline ramfs)
+
 source "$ROOT/setup/lib/gpu.sh"
 
-fail() {
-    local rc=$?
-    echo "fail: ${BASH_SOURCE[1]:-${BASH_SOURCE[0]}}:${BASH_LINENO[0]:-?}: ${BASH_COMMAND}" >&2
-    exit "$rc"
+# Output 
+
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+    B=$'\e[1m' DIM=$'\e[2m' RED=$'\e[31m' GRN=$'\e[32m' YEL=$'\e[33m' BLU=$'\e[34m' RST=$'\e[0m'
+else
+    B="" DIM="" RED="" GRN="" YEL="" BLU="" RST=""
+fi
+
+header() { printf '%s==>%s %s%s%s\n' "$BLU" "$RST" "$B" "$*" "$RST"; }
+add() { printf '  %s+%s %s\n' "$GRN" "$RST" "$*"; }
+del() { printf '  %s-%s %s\n' "$RED" "$RST" "$*"; }
+moved() { printf '  %s~%s %s\n' "$YEL" "$RST" "$*"; }
+note() { printf '  %s·%s %s\n' "$DIM" "$RST" "$*"; }
+skip() { note "skipped: $*"; }
+warn() { printf '  %s!%s %s\n' "$YEL" "$RST" "$*" >&2; }
+
+short() { # <path>: path with $HOME_T shown as ~
+    if [[ "$1" == "$HOME_T"/* ]]; then printf '~/%s\n' "${1#"$HOME_T"/}"; else printf '%s\n' "$1"; fi
 }
+
+quiet() { # <label> <cmd…>: run cmd with its output hidden, shown only if it fails
+    local label=$1 log rc=0
+    shift
+    log=$(mktemp)
+    printf '  %s·%s %s… ' "$DIM" "$RST" "$label"
+    "$@" >"$log" 2>&1 || rc=$?
+    if ((rc)); then
+        printf '%sfailed%s\n' "$RED" "$RST"
+        sed 's/^/    /' "$log" >&2
+    else
+        printf '%sok%s\n' "$GRN" "$RST"
+    fi
+    rm -f "$log"
+    return "$rc"
+}
+
+# Errors 
+
 die() {
-    echo "$*" >&2
+    printf '%s✗%s %s\n' "$RED" "$RST" "$*" >&2
     exit 1
 }
-trap 'fail' ERR
 
-req_cmd() { command -v "$1" &>/dev/null || die "Missing cmd: $1"; }
-req_dir() { [[ -d "$1" ]] || die "Missing dir: $1"; }
-live() { [[ "$TARGET" == "/" ]]; }
-tpath() { if live; then echo "$1"; else echo "${TARGET%/}$1"; fi; }
-sudoc() { if live; then sudo "$@"; else "$@"; fi; }
-write() {
-    sudoc mkdir -p "${1%/*}"
-    sudoc tee "$1" >/dev/null
-} # stdin -> file
-rebuild() { ((norebuild)) || update_ramfs; }
-ini_get() { grep -m1 -oP "(?<=^$2=).*" "$1"; }
+on_err() { # <exit code> <line>: report the failure once, from the top-level shell
+    local rc=$1 i=1 where
+    if ((BASH_SUBSHELL)); then exit "$rc"; fi
+    # Skip pass-through wrappers so the report names the function that called them.
+    while [[ "${FUNCNAME[i]:-}" =~ ^(sudoc|quiet)$ ]]; do i=$((i + 1)); done
+    if ((i == 1)); then
+        where="${FUNCNAME[1]:-main} line $2: $BASH_COMMAND"
+    else
+        where="${FUNCNAME[i]:-main} line ${BASH_LINENO[i - 1]}"
+    fi
+    printf '%s✗%s %s failed (%s)\n' "$RED" "$RST" "${current:-update}" "$where" >&2
+    exit "$rc"
+}
+trap 'on_err $? $LINENO' ERR
 
-_unlink() {
-    [[ -L "$1" ]] || return 0
-    echo "removing $1"
-    sudoc rm -f "$1"
+req_cmd() { command -v "$1" &>/dev/null || die "missing command: $1"; }
+req_dir() { [[ -d "$1" ]] || die "missing directory: $1"; }
+has() { command -v "$1" &>/dev/null; }
+
+# Target root and sudo 
+
+live() { [[ "$TARGET" == / ]]; }
+
+tpath() { # </abs/path>: that path under $TARGET
+    if live; then echo "$1"; else echo "${TARGET%/}$1"; fi
 }
 
-_link() {
-    [[ -e "$2" && ! -L "$2" ]] && return 0
-    [[ "$(readlink -f "$2" 2>/dev/null)" == "$(readlink -f "$1")" ]] && return 0
-    echo "linking $2"
-    sudoc ln -sfn "$1" "$2"
+sudoc() { # <cmd…>: run as root on the live system, as yourself under a scratch $TARGET
+    if live; then sudo "$@"; else "$@"; fi
 }
 
-_link_all() {
-    local src="$1" dst f
-    dst=$(tpath /usr/local/bin)
-    req_dir "$src"
-    ((remove)) || sudoc mkdir -p "$dst"
-    for f in "$src"/*; do
-        [[ -f "$f" ]] || continue
-        if ((remove)); then _unlink "$dst/${f##*/}"; else _link "$f" "$dst/${f##*/}"; fi
-    done
+# Writing files (each sets $dirty when it changes something) 
+
+dirty=0  # the current module changed a file
+queued=0 # under `all`: a module changed something the initramfs contains
+
+_same() { # <file> <file>: true if both exist with identical content
+    if [[ -r "$2" ]]; then cmp -s "$1" "$2"; else sudoc cmp -s "$1" "$2" 2>/dev/null; fi
 }
 
-_copy_dir() {
+_install() { # <src> <dest> [mode]: install a file as root unless it already matches
+    if _same "$1" "$2"; then return 0; fi
+    sudoc install -Dm"${3:-644}" "$1" "$2"
+    add "$(short "$2")"
+    dirty=1
+}
+
+write() { # <dest> [mode] < content: write stdin to dest as root unless it already matches
+    local tmp
+    tmp=$(mktemp)
+    cat >"$tmp"
+    _install "$tmp" "$1" "${2:-644}"
+    rm -f "$tmp"
+}
+
+_copy_dir() { # <src dir> <dest dir>: replace dest with a copy of src unless they already match
+    if diff -rq "$1" "$2" &>/dev/null; then return 0; fi
     sudoc rm -rf "$2"
     sudoc mkdir -p "$2"
     sudoc cp -r --no-preserve=ownership "$1/." "$2/"
+    add "$(short "$2")"
+    dirty=1
 }
 
-_stow_pkg() { # <pkg dir> <target> [stow args...]
-    local src="$1" tgt="$2"
-    shift 2
-    local stow=(stow -d "${src%/*}" -t "$tgt" --"$MODE" --no-folding -v "$@") log s t
-    log=$(mktemp)
-    if ! "${stow[@]}" -n "${src##*/}" >"$log" 2>&1; then
-        grep -q "conflict\|existing target" "$log" || die "stow dry-run failed (${src##*/}):"$'\n'"$(<"$log")"
-        while IFS= read -r -d '' s; do
-            t="$tgt/${s#"$src"/}"
-            if [[ -L "$t" ]]; then
-                [[ "$(readlink -f "$t")" == "$(readlink -f "$s")" ]] || {
-                    echo "removing conflicting symlink: $t"
-                    rm -f "$t"
-                }
-            elif [[ -f "$t" ]]; then
-                echo "backing up conflicting file: $t -> $t.bak"
-                mv -f "$t" "$t.bak"
-            fi
-        done < <(find "$src" \( -name .git -o -name device \) -prune -o -type f -print0)
-    fi
-    rm -f "$log"
-    "${stow[@]}" "${src##*/}"
+rebuild() { # initramfs rebuild after a change: now, or once at the end of `all`
+    ((dirty)) || return 0
+    if ((norebuild)); then queued=1; else update_ramfs; fi
 }
+
+ini_get() { grep -m1 -oP "(?<=^$2=).*" "$1"; } # <file> <key>
+
+# Links 
+
+_link() { # <src> <dest> [sudoc]: point dest at src; never replaces a real file
+    if [[ -e "$2" && ! -L "$2" ]]; then
+        note "keeping existing $(short "$2")"
+        return 0
+    fi
+    if [[ "$(readlink -f "$2" 2>/dev/null)" == "$(readlink -f "$1")" ]]; then return 0; fi
+    "${@:3}" ln -sfn "$1" "$2"
+    add "$(short "$2")"
+}
+
+_unlink() { # <path> [sudoc]: remove path if it is a symlink
+    [[ -L "$1" ]] || return 0
+    "${@:2}" rm -f "$1"
+    del "$(short "$1")"
+}
+
+_link_all() { # <dir>: link each file in dir into /usr/local/bin (unlink with --remove)
+    local src=$1 dst f
+    dst=$(tpath /usr/local/bin)
+    req_dir "$src"
+    if ((!remove)); then sudoc mkdir -p "$dst"; fi
+    for f in "$src"/*; do
+        [[ -f "$f" ]] || continue
+        if ((remove)); then _unlink "$dst/${f##*/}" sudoc; else _link "$f" "$dst/${f##*/}" sudoc; fi
+    done
+}
+
+# Stow helpers 
+
+_valid_session() {
+    local s
+    for s in "${SESSIONS[@]}"; do [[ "$1" == "$s" ]] && return 0; done
+    die "stow: expected one of: ${SESSIONS[*]}"
+}
+
+_prune_dead_links() { # <config dir>: remove dangling links that point into this repo
+    local t
+    while IFS= read -r -d '' t; do
+        [[ "$(realpath -m "$(dirname "$t")/$(readlink "$t")")" == "$ROOT"/* ]] || continue
+        rm -f "$t"
+        del "dead link $(short "$t")"
+    done < <(find "$1" "$HOME_T/.zshrc" "$HOME_T/.gtkrc-2.0" "$HOME_T/.Xresources" -xtype l -print0 2>/dev/null)
+    find "$1" -depth -type d -empty -delete 2>/dev/null || true
+}
+
+_clear_conflicts() { # <pkg dir> <target>: move aside whatever blocks the package's links
+    local src=$1 tgt=$2 s t
+    while IFS= read -r -d '' s; do
+        t="$tgt/${s#"$src"/}"
+        if [[ -L "$t" ]]; then
+            if [[ "$(readlink -f "$t")" != "$(readlink -f "$s")" ]]; then
+                rm -f "$t"
+                del "conflicting link $(short "$t")"
+            fi
+        elif [[ -f "$t" ]]; then
+            mv -f "$t" "$t.bak"
+            moved "backed up $(short "$t") -> ${t##*/}.bak"
+        fi
+    done < <(find "$src" \( -name .git -o -name device \) -prune -o -type f -print0)
+}
+
+_stow_pkg() { # <pkg dir> <target> [stow args…]: stow one package, listing the new links
+    local src=$1 tgt=$2
+    shift 2
+    local pkg=${src##*/} plan n=0 l
+    local stow=(stow -d "${src%/*}" -t "$tgt" --"$MODE" --no-folding "$@")
+
+    # The dry run lists what will change ("LINK: <path> => <src>"), or fails on conflicts.
+    if ! plan=$("${stow[@]}" -n -v "$pkg" 2>&1); then
+        grep -q "conflict\|existing target" <<<"$plan" || die "stow dry run failed for $pkg:"$'\n'"$plan"
+        _clear_conflicts "$src" "$tgt"
+        plan=$("${stow[@]}" -n -v "$pkg" 2>&1)
+    fi
+    "${stow[@]}" "$pkg"
+
+    while IFS= read -r l; do
+        add "$(short "$tgt/$l")"
+        n=$((n + 1))
+    done < <(sed -n 's/^LINK: \(.*\) => .*/\1/p' <<<"$plan")
+    if ((!n)); then note "$pkg: up to date"; fi
+}
+
+_stow_remove() { # <session>: unstow a session and drop the folders it leaves empty
+    local s=$1 cfg="$HOME_T/.config" d l out
+    _unlink "$cfg/$s/local"
+    out=$(stow -d "$ROOT/dots" -t "$cfg" -D -v "$s" 2>&1)
+    while IFS= read -r l; do del "$(short "$cfg/$l")"; done < <(sed -n 's/^UNLINK: //p' <<<"$out")
+    for d in "$ROOT/dots/$s"/*/; do
+        d="$cfg/$(basename "$d")"
+        if [[ -d "$d" ]]; then find "$d" -depth -type d -empty -delete; fi
+    done
+}
+
+_link_device() { # <session>: link ~/.config/<session>/local to this host's device file, if any
+    local s=$1 lt="$HOME_T/.config/$1/local" hf
+    hf="$ROOT/dots/$s/$s/device/$(</etc/hostname)"
+    if [[ ! -f "$hf" ]]; then
+        _unlink "$lt"
+    elif [[ "$(readlink -f "$lt" 2>/dev/null)" != "$hf" ]]; then
+        ln -sfnr "$hf" "$lt"
+        add "$(short "$lt")"
+    fi
+}
+
+# Modules 
 
 update_stow() {
-    [[ "$arg" =~ ^(hl|i3)$ ]] || die "stow: expected hl or i3"
+    _valid_session "$arg"
     MODE="${STOW_MODE:-stow}"
     [[ "$MODE" =~ ^(stow|restow)$ ]] || die "invalid STOW_MODE: $MODE"
     req_cmd stow
-    local cfg="$HOME_T/.config" lt="$HOME_T/.config/$arg/local" d t p
-
     if ((remove)); then
-        [[ -L "$lt" ]] && rm -f "$lt"
-        stow -d "$ROOT/dots" -t "$cfg" -D -v "$arg"
-        for d in "$ROOT/dots/$arg"/*/; do
-            d="$cfg/$(basename "$d")"
-            [[ -d "$d" ]] && find "$d" -depth -type d -empty -print -delete
-        done
+        _stow_remove "$arg"
         return 0
     fi
 
-    while IFS= read -r -d '' t; do
-        [[ "$(realpath -m "$(dirname "$t")/$(readlink "$t")")" == "$ROOT"/* ]] && {
-            echo "removing dead symlink: $t"
-            rm -f "$t"
-        }
-    done < <(find "$cfg" "$HOME_T/.zshrc" "$HOME_T/.gtkrc-2.0" "$HOME_T/.Xresources" -xtype l -print0 2>/dev/null)
-    find "$cfg" -depth -type d -empty -delete 2>/dev/null || true
-
+    local cfg="$HOME_T/.config" p
+    _prune_dead_links "$cfg"
     mkdir -p "$cfg"
     for p in common "$arg"; do _stow_pkg "$ROOT/dots/$p" "$cfg" --ignore=/device; done
     _stow_pkg "$ROOT/home" "$HOME_T"
-
-    local hf
-    hf="$ROOT/dots/$arg/$arg/device/$(</etc/hostname)"
-    if [[ -f "$hf" ]]; then
-        echo "linking $lt"
-        ln -sfnr "$hf" "$lt"
-    elif [[ -L "$lt" ]]; then
-        echo "removing $lt"
-        rm -f "$lt"
-    fi
+    _link_device "$arg"
 }
 
 update_sudo() {
-    local t
-    t=$(tpath /etc/sudoers.d/10-pwfeedback)
-    echo "Defaults pwfeedback" | write "$t"
-    sudoc chmod 440 "$t"
+    write "$(tpath /etc/sudoers.d/10-pwfeedback)" 440 <<<"Defaults pwfeedback"
 }
 
 update_font() {
-    echo '<?xml version="1.0"?><!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd"><fontconfig><alias><family>monospace</family><prefer><family>ComicShannsMono Nerd Font Mono</family><family>ComicShannsMono Nerd Font</family></prefer></alias></fontconfig>' |
-        write "$(tpath /etc/fonts/local.conf)"
+    write "$(tpath /etc/fonts/local.conf)" <<'EOF'
+<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
+<fontconfig>
+  <alias>
+    <family>monospace</family>
+    <prefer>
+      <family>ComicShannsMono Nerd Font Mono</family>
+      <family>ComicShannsMono Nerd Font</family>
+    </prefer>
+  </alias>
+</fontconfig>
+EOF
 
-    echo "installing tty font"
+    dirty=0 # only the tty font below goes into the initramfs
     local vc
     vc=$(tpath /etc/vconsole.conf)
-    sudoc install -Dm644 "$THEMES/font/comicshanns.psf" "$(tpath /usr/share/kbd/consolefonts/comicshanns.psf)"
-    sudoc touch "$vc"
-    sudoc sed -i '/^FONT=/d' "$vc"
-    echo "FONT=comicshanns" | sudoc tee -a "$vc" >/dev/null
-    if live; then sudo systemctl restart systemd-vconsole-setup &>/dev/null || true; fi
+    _install "$THEMES/font/comicshanns.psf" "$(tpath /usr/share/kbd/consolefonts/comicshanns.psf)"
+    write "$vc" <<<"$(
+        grep -v '^FONT=' "$vc" 2>/dev/null || true
+        echo "FONT=comicshanns"
+    )"
+    if ((dirty)) && live; then sudo systemctl restart systemd-vconsole-setup &>/dev/null || true; fi
     rebuild
-}
-
-update_vscode() {
-    local out found=0
-    while IFS= read -r -d '' out; do
-        echo "owning $out"
-        sudoc chown -R "$USER:$USER" "$out"
-        found=1
-    done < <(find "$(tpath /opt)" "$(tpath /usr/share)" "$(tpath /usr/lib)" -maxdepth 5 -type d \
-        \( -path '*/resources/app/out' -o -path '*/code/out' \) -print0 2>/dev/null)
-    ((found)) || echo "no vscode-based editors found"
-}
-
-update_ramfs() {
-    _detect_gpu
-    local mods=() kms="kms " ply=""
-    $has_nvidia && mods+=(nvidia nvidia_modeset nvidia_uvm nvidia_drm)
-    $has_amd && mods+=(amdgpu)
-    $has_intel && mods+=(i915)
-    $has_nvidia && ! $has_amd && ! $has_intel && kms=""
-    command -v plymouth-set-default-theme &>/dev/null && ply="plymouth plymouth-shutdown "
-
-    echo "detected modules: ${mods[*]:-none}"
-    printf 'MODULES=(%s)\n\nHOOKS=(base systemd %sautodetect microcode modconf %skeyboard sd-vconsole block filesystems fsck)\n\nCOMPRESSION="gzip"\n' \
-        "${mods[*]}" "$ply" "$kms" | write "$(tpath /etc/mkinitcpio.conf)"
-    echo "rebuilding initramfs"
-    sudoc mkinitcpio -P
 }
 
 update_cursor() {
     local dst
     dst=$(tpath "/usr/share/icons/$THEME")
     _copy_dir "$THEMES/cursor/$THEME" "$dst"
-    if live && command -v gtk-update-icon-cache &>/dev/null; then sudo gtk-update-icon-cache -f -t "$dst" || true; fi
+    if ((dirty)) && live && has gtk-update-icon-cache; then
+        sudo gtk-update-icon-cache -f -t "$dst" &>/dev/null || warn "icon cache update failed"
+    fi
 }
 
 update_gtk() {
-    command -v gsettings &>/dev/null || return 0
-    [[ -n "${DBUS_SESSION_BUS_ADDRESS:-}" || -S "${XDG_RUNTIME_DIR:-/run/user/$UID}/bus" ]] ||
-        {
-            echo "no session bus, skipping gtk sync"
-            return 0
-        }
+    if ! has gsettings; then
+        skip "gsettings not installed"
+        return 0
+    fi
+    if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" && ! -S "${XDG_RUNTIME_DIR:-/run/user/$UID}/bus" ]]; then
+        skip "no session bus"
+        return 0
+    fi
 
-    local ini="$ROOT/dots/common/gtk-3.0/settings.ini" kv dark
+    local ini="$ROOT/dots/common/gtk-3.0/settings.ini" key dark
     [[ -f "$ini" ]] || die "missing $ini"
-    for kv in gtk-theme:gtk-theme-name icon-theme:gtk-icon-theme-name font-name:gtk-font-name \
-        cursor-theme:gtk-cursor-theme-name cursor-size:gtk-cursor-theme-size; do
-        gsettings set org.gnome.desktop.interface "${kv%%:*}" "$(ini_get "$ini" "${kv#*:}")"
+    # gsettings key -> settings.ini key
+    local -A keys=(
+        [gtk-theme]=gtk-theme-name
+        [icon-theme]=gtk-icon-theme-name
+        [font-name]=gtk-font-name
+        [cursor-theme]=gtk-cursor-theme-name
+        [cursor-size]=gtk-cursor-theme-size
+    )
+    for key in "${!keys[@]}"; do
+        gsettings set org.gnome.desktop.interface "$key" "$(ini_get "$ini" "${keys[$key]}")"
     done
     dark=$(ini_get "$ini" gtk-application-prefer-dark-theme)
     gsettings set org.gnome.desktop.interface color-scheme "$([[ "$dark" == 1 ]] && echo prefer-dark || echo default)"
+    note "gsettings synced from gtk-3.0/settings.ini"
 }
 
 update_bin() { _link_all "$ROOT/scripts"; }
 
-update_symlinks() {
-    local dirs=(/usr/bin /usr/local/bin /usr/share/applications "$HOME_T/.config" "$HOME_T/.zshrc" "$HOME_T/.gtkrc-2.0")
-    local all=() dir broken depth reply
-    for dir in "${dirs[@]}"; do
-        depth=(-maxdepth 1)
-        [[ "$dir" == "$HOME_T/.config" ]] && depth=()
-        mapfile -d '' broken < <(find "$dir" "${depth[@]}" -xtype l -print0 2>/dev/null)
-        ((${#broken[@]})) || continue
-        echo "$dir:"
-        printf '  %s\n' "${broken[@]}"
-        all+=("${broken[@]}")
-    done
-    ((${#all[@]})) || {
-        echo "No broken symlinks found."
-        return 0
-    }
-    echo
-    read -r -p "Found ${#all[@]} broken symlink(s). Remove? [y/N] " reply
-    [[ "$reply" =~ ^[Yy]$ ]] || {
-        echo "Aborted."
-        return 0
-    }
-    sudo rm -- "${all[@]}"
-    echo "Done. Removed ${#all[@]} broken symlink(s)."
+update_vscode() { # editors must be user-owned so the UI patches can write into them
+    local out found=0
+    while IFS= read -r -d '' out; do
+        found=1
+        [[ -n "$(find "$out" ! -user "$USER" -print -quit 2>/dev/null)" ]] || continue
+        sudoc chown -R "$USER:$USER" "$out"
+        add "owned $out"
+    done < <(find "$(tpath /opt)" "$(tpath /usr/share)" "$(tpath /usr/lib)" -maxdepth 5 -type d \
+        \( -path '*/resources/app/out' -o -path '*/code/out' \) -print0 2>/dev/null)
+    if ((!found)); then skip "no vscode-based editors found"; fi
 }
 
-update_grub() {
-    local dst
-    dst=$(tpath "/boot/grub/themes/$THEME")
-    if ((remove)); then
-        sudoc rm -rf "$dst"
-    else
-        [[ "$arg" =~ ^[0-9]+x[0-9]+$ ]] || die "grub: expected <WxH> or --remove"
-        req_dir "$THEMES/grub/${THEME}_$arg"
-        sudoc install -Dm644 "$THEMES/grub/grub" "$(tpath /etc/default/grub)"
-        _copy_dir "$THEMES/grub/${THEME}_$arg" "$dst"
+update_yazi() {
+    ((!remove)) || die "yazi: --remove not supported"
+    if ! has yazi; then
+        skip "yazi not installed"
+        return 0
     fi
-    if live; then sudo grub-mkconfig -o /boot/grub/grub.cfg; fi
+    local plugins=(
+        AminurAlam/yazi-plugins:{spot,spot-image}
+        BennyOe/tokyo-night
+        boydaihungst/file-extra-metadata
+        KKV9/compress
+        uhs-robert/recycle-bin
+        yazi-rs/plugins:{full-border,mount,toggle-pane}
+    )
+    local p have
+    have=$(ya pkg list)
+    for p in "${plugins[@]}"; do
+        grep -iqF "$p" <<<"$have" || quiet "installing $p" ya pkg add "$p"
+    done
+    quiet "upgrading plugins" ya pkg upgrade --discard
 }
 
-update_cmdline() {
-    _detect_gpu
-    local extra=()
-    $has_nvidia && extra+=(nvidia_drm.modeset=1)
-    $has_intel && extra+=(i915.fastboot=1)
-    printf '%s %s\n' "$(<"$ROOT/system/cmdline")" "${extra[*]}" | write "$(tpath /etc/kernel/cmdline)"
+update_zen() {
+    local ini="$HOME_T/.config/zen/installs.ini" rel prof chrome palette f
+    if [[ ! -f "$ini" ]]; then
+        skip "zen profile not found"
+        return 0
+    fi
+    rel=$(ini_get "$ini" Default)
+    if [[ -z "$rel" || ! -d "$HOME_T/.config/zen/$rel" ]]; then
+        skip "zen default profile not found"
+        return 0
+    fi
+    prof="$HOME_T/.config/zen/$rel"
+    chrome="$prof/chrome"
+    palette="${XDG_STATE_HOME:-$HOME_T/.local/state}/astralia/palette.css"
+
+    if ((remove)); then
+        for f in "$chrome/userChrome.css" "$chrome/astralia-palette.css" "$prof/user.js"; do _unlink "$f"; done
+        return 0
+    fi
+    mkdir -p "$chrome"
+    _link "$ROOT/dots/zen/userChrome.css" "$chrome/userChrome.css"
+    _link "$ROOT/dots/zen/user.js" "$prof/user.js"
+    _link "$palette" "$chrome/astralia-palette.css"
+}
+
+update_zram() {
+    write "$(tpath /etc/systemd/zram-generator.conf)" <<'EOF'
+[zram0]
+compression-algorithm = zstd
+EOF
+    if ((dirty)) && live; then note "zram changes apply on next boot"; fi
+}
+
+update_splash() {
+    _install "$THEMES/splash/splash.bmp" "$(tpath /usr/share/systemd/bootctl/splash-arch.bmp)"
     rebuild
 }
 
 update_plymouth() {
-    command -v plymouth-set-default-theme &>/dev/null || {
-        echo "plymouth not installed, skipping"
+    if ! has plymouth-set-default-theme; then
+        skip "plymouth not installed"
         return 0
-    }
+    fi
     local dst
     dst=$(tpath "/usr/share/plymouth/themes/$THEME")
     if ((remove)); then
-        sudoc rm -rf "$dst"
+        if [[ -d "$dst" ]]; then
+            sudoc rm -rf "$dst"
+            del "$dst"
+            dirty=1
+        fi
     else
         req_dir "$THEMES/plymouth/$THEME"
         _copy_dir "$THEMES/plymouth/$THEME" "$dst"
+        if live && [[ "$(plymouth-set-default-theme)" != "$THEME" ]]; then
+            quiet "setting default theme" sudo plymouth-set-default-theme "$THEME"
+            dirty=1
+        fi
         if live; then
-            sudo plymouth-set-default-theme "$THEME"
             sudo systemctl enable plymouth-{start,quit-wait,quit,poweroff,reboot,halt,kexec}.service &>/dev/null || true
         fi
     fi
     rebuild
 }
 
-update_splash() {
-    sudoc install -Dm644 "$THEMES/splash/splash.bmp" "$(tpath /usr/share/systemd/bootctl/splash-arch.bmp)"
+update_cmdline() {
+    _detect_gpu
+    local args fs
+    args=$(<"$ROOT/system/cmdline")
+    fs=$(findmnt -no FSTYPE -T "$TARGET")
+    if [[ -n "$fs" ]]; then args+=" rootfstype=$fs"; fi
+    if $has_nvidia; then args+=" nvidia_drm.modeset=1"; fi
+    if $has_intel && ! $has_intel_xe; then args+=" i915.fastboot=1"; fi
+    write "$(tpath /etc/kernel/cmdline)" <<<"$args"
     rebuild
 }
 
-update_yazi() {
-    ((! remove)) || die "yazi: --remove not supported"
-    command -v yazi &>/dev/null || return 0
-    local p have
-    have=$(ya pkg list)
-    for p in AminurAlam/yazi-plugins:{spot,spot-image} BennyOe/tokyo-night boydaihungst/file-extra-metadata \
-        KKV9/compress uhs-robert/recycle-bin yazi-rs/plugins:{full-border,mount,toggle-pane}; do
-        if grep -iqF "$p" <<<"$have"; then echo "already installed: $p"; else
-            echo "installing $p"
-            ya pkg add "$p"
-        fi
-    done
-    ya pkg upgrade --discard
+update_ramfs() {
+    _detect_gpu
+    _detect_cpu
+    local mods=() hooks=(base systemd) nvidia_only=false
+    $has_nvidia && mods+=(nvidia nvidia_modeset nvidia_uvm nvidia_drm)
+    $has_amd && mods+=(amdgpu)
+    if $has_intel_xe; then mods+=(xe); elif $has_intel; then mods+=(i915); fi
+    $has_nvidia && ! $has_amd && ! $has_intel && nvidia_only=true
+
+    if has plymouth-set-default-theme; then hooks+=(plymouth plymouth-shutdown); fi
+    hooks+=(autodetect microcode modconf)
+    $nvidia_only || hooks+=(kms) # the kms hook breaks nvidia-only boot
+    hooks+=(keyboard sd-vconsole block filesystems fsck)
+
+    note "gpu modules: ${mods[*]:-none}"
+    if live && [[ -n "$cpu_ucode" ]] && ! pacman -Q "$cpu_ucode" &>/dev/null; then
+        warn "$cpu_ucode is not installed, so the microcode hook does nothing"
+    fi
+
+    write "$(tpath /etc/mkinitcpio.conf)" <<EOF
+MODULES=(${mods[*]})
+
+HOOKS=(${hooks[*]})
+
+COMPRESSION="zstd"
+EOF
+
+    # Under `all`, rebuild only when something changed; `update ramfs` always rebuilds.
+    if ((dirty || queued || !all)); then
+        quiet "rebuilding initramfs" sudoc mkinitcpio -P
+    else
+        note "initramfs up to date"
+    fi
 }
 
-update_zen() {
-    local ini="$HOME_T/.config/zen/installs.ini" rel prof chrome state f
-    [[ -f "$ini" ]] || {
-        echo "zen profile not found, skipping"
-        return 0
-    }
-    rel=$(ini_get "$ini" Default)
-    [[ -n "$rel" && -d "$HOME_T/.config/zen/$rel" ]] || {
-        echo "zen default profile not found, skipping"
-        return 0
-    }
-    prof="$HOME_T/.config/zen/$rel"
-    chrome="$prof/chrome"
-    state="${XDG_STATE_HOME:-$HOME_T/.local/state}/astralia/palette.css"
+update_grub() {
+    local dst
+    dst=$(tpath "/boot/grub/themes/$THEME")
     if ((remove)); then
-        for f in "$chrome/userChrome.css" "$chrome/astralia-palette.css" "$prof/user.js"; do
-            if [[ -L "$f" ]]; then
-                echo "removing $f"
-                rm -f "$f"
-            fi
-        done
+        if [[ -d "$dst" ]]; then
+            sudoc rm -rf "$dst"
+            del "$dst"
+        fi
+    else
+        [[ "$arg" =~ ^[0-9]+x[0-9]+$ ]] || die "grub: expected <WxH> or --remove"
+        req_dir "$THEMES/grub/${THEME}_$arg"
+        _install "$THEMES/grub/grub" "$(tpath /etc/default/grub)"
+        _copy_dir "$THEMES/grub/${THEME}_$arg" "$dst"
+    fi
+    if live; then quiet "grub-mkconfig" sudo grub-mkconfig -o /boot/grub/grub.cfg; fi
+}
+
+update_symlinks() {
+    local dirs=(/usr/bin /usr/local/bin /usr/share/applications "$HOME_T/.config" "$HOME_T/.zshrc" "$HOME_T/.gtkrc-2.0")
+    local all_broken=() dir broken depth reply
+    for dir in "${dirs[@]}"; do
+        depth=(-maxdepth 1)
+        [[ "$dir" == "$HOME_T/.config" ]] && depth=()
+        mapfile -d '' broken < <(find "$dir" "${depth[@]}" -xtype l -print0 2>/dev/null)
+        ((${#broken[@]})) || continue
+        note "$(short "$dir"):"
+        printf '      %s\n' "${broken[@]}"
+        all_broken+=("${broken[@]}")
+    done
+    if ((!${#all_broken[@]})); then
+        note "no broken symlinks"
         return 0
     fi
-    mkdir -p "$chrome"
-    for f in "$ROOT/dots/zen/userChrome.css:$chrome/userChrome.css" "$ROOT/dots/zen/user.js:$prof/user.js" \
-        "$state:$chrome/astralia-palette.css"; do
-        if [[ -e "${f#*:}" && ! -L "${f#*:}" ]]; then
-            echo "keeping existing ${f#*:}"
-        else
-            echo "linking ${f#*:}"
-            ln -sfn "${f%%:*}" "${f#*:}"
-        fi
-    done
+    read -r -p "  Remove ${#all_broken[@]} broken symlink(s)? [y/N] " reply
+    if [[ ! "$reply" =~ ^[Yy]$ ]]; then
+        skip "nothing removed"
+        return 0
+    fi
+    sudo rm -- "${all_broken[@]}"
+    del "removed ${#all_broken[@]} broken symlink(s)"
 }
 
 update_all() {
     local m
-    norebuild=1 # one initramfs rebuild at the end
+    all=1 norebuild=1 # one initramfs rebuild, by ramfs at the end
     arg=$(cat "$SESSION_FILE" 2>/dev/null || true)
-    if [[ -n "$arg" ]]; then run stow; else echo "  -> stow skipped (no session in $SESSION_FILE; run a setup script)"; fi
-    for m in sudo font cursor gtk bin vscode yazi zen splash plymouth cmdline ramfs; do run "$m"; done
+    if [[ -n "$arg" ]]; then
+        run stow
+    else
+        header stow
+        skip "no session in $(short "$SESSION_FILE"); run a setup script"
+    fi
+    for m in "${ALL_MODULES[@]}"; do run "$m"; done
 }
 
-run() {
-    echo "  -> update $1"
+# CLI 
+
+run() { # <module>
+    current=$1 dirty=0
+    if [[ "$1" != all ]]; then
+        if [[ "$1" =~ ^(stow|grub)$ && -n "$arg" ]]; then header "$1 ($arg)"; else header "$1"; fi
+    fi
     "update_$1"
 }
 
 usage() {
     cat <<EOF
 Usage: update <module> [arg] [--remove] [--no-rebuild]
-Modules: $(declare -F | sed -n 's/^declare -f update_//p' | tr '\n' ' ')
-  stow hl|i3 [--remove]
-  grub <WxH> | grub --remove
-  zen [--remove]   link the Zen userChrome.css, user.js and synced palette.css
-  --no-rebuild   skip initramfs rebuild (font, splash, plymouth, cmdline)
+
+Modules:
+  all                 stow the current session, then: ${ALL_MODULES[*]}
+  stow <$(
+        IFS='|'
+        echo "${SESSIONS[*]}"
+    )>     link dotfiles for a session             [--remove]
+  sudo                show password feedback in sudo
+  font                monospace font and tty font
+  cursor              install the $THEME cursor theme
+  gtk                 sync gsettings from gtk-3.0/settings.ini
+  bin                 link scripts/ into /usr/local/bin       [--remove]
+  vscode              make vscode-based editors user-owned (for UI patches)
+  yazi                install and upgrade yazi plugins
+  zen                 link Zen userChrome.css, user.js, palette [--remove]
+  zram                zram swap config
+  splash              boot splash image
+  plymouth            plymouth theme                          [--remove]
+  cmdline             kernel cmdline (+ root fs and GPU options)
+  ramfs               mkinitcpio.conf for this GPU, then rebuild the initramfs
+  grub <WxH>          grub theme for a screen resolution      [--remove]
+  symlinks            find broken symlinks and offer to remove them
+
+Flags:
+  --remove        undo the module
+  --no-rebuild    don't rebuild the initramfs (font, splash, plymouth, cmdline)
+
+Environment:
+  UPDATE_TARGET_ROOT  root for system files (default /)
+  STOW_TARGET         home for dotfiles (default \$HOME)
+  STOW_MODE           stow | restow
+  NO_COLOR            plain output
 EOF
     exit "${1:-0}"
 }
 
-remove=0 norebuild=0 arg=""
+remove=0 norebuild=0 all=0 arg="" current=""
 (($#)) || usage 2
-mod="$1"
+mod=$1
 shift
 [[ "$mod" == -h || "$mod" == --help ]] && usage 0
 while (($#)); do
     case "$1" in
-    --remove | remove) remove=1 ;; # bare "remove" kept for old `stow hl remove`
+    --remove | remove) remove=1 ;; # bare "remove" kept for the old `stow hl remove`
     --no-rebuild) norebuild=1 ;;
     -*) die "unknown flag: $1" ;;
     *)
         [[ -z "$arg" && "$mod" =~ ^(stow|grub)$ ]] || die "too many args"
-        arg="$1"
+        arg=$1
         ;;
     esac
     shift
 done
-declare -F "update_$mod" >/dev/null || die "unknown module: $mod"
-"update_$mod"
-echo success
+declare -F "update_$mod" >/dev/null || die "unknown module: $mod (see update --help)"
+run "$mod"
+printf '%s✓%s done\n' "$GRN" "$RST"
