@@ -14,6 +14,7 @@ return function(V, B, T, L, Anim)
         [mod("C", "s")] = hl.dsp.exec_cmd(sh .. "dashboard"),
         [mod("M", "s")] = hl.dsp.exec_cmd(sh .. "rain"),
         [mod("V", "s")] = hl.dsp.exec_cmd(sh .. "visualizer"),
+        ["ALT + W"] = hl.dsp.exec_cmd(sh .. "wallpaper"),
         ["SHIFT + SPACE"] = hl.dsp.exec_cmd(sh .. "launcher"),
     })
 

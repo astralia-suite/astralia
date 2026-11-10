@@ -36,6 +36,7 @@ bindShell("shell-dashboard", "Super+Shift+C", "dashboard");
 bindShell("shell-rain", "Super+Shift+M", "rain");
 bindShell("shell-visualizer", "Super+Shift+V", "visualizer");
 bindShell("shell-launcher", "Shift+Space", "launcher");
+bindShell("shell-wallpaper", "Alt+W", "wallpaper");
 
 // Apps
 bindOpen("browser", "Super+B", "browser");
