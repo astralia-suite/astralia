@@ -1,8 +1,0 @@
-wallpaper_image = Image("background.png");
-wallpaper_sprite = Sprite(wallpaper_image.Scale(Window.GetWidth(), Window.GetHeight()));
-wallpaper_sprite.SetZ(-100);
-
-fun refresh_callback() {
-    wallpaper_sprite.SetImage(wallpaper_image.Scale(Window.GetWidth(), Window.GetHeight()));
-}
-Plymouth.SetRefreshFunction(refresh_callback);

@@ -1,1 +1,1 @@
-rw zswap.enabled=0 quiet splash fbcon=nodefer
+zswap.enabled=0 quiet loglevel=3 rd.systemd.show_status=auto rd.udev.log_level=3 udev.log-priority=3 fbcon=nodefer

@@ -13,7 +13,7 @@ THEMES="$ROOT/system/themes"
 SESSION_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/astralia/session"
 
 SESSIONS=(hl i3 sj)
-ALL_MODULES=(sudo font cursor gtk bin vscode yazi zen zram splash plymouth cmdline ramfs)
+ALL_MODULES=(sudo font cursor gtk bin vscode yazi zen zram ramfs grub)
 
 source "$ROOT/setup/lib/gpu.sh"
 
@@ -174,7 +174,7 @@ _prune_dead_links() { # <config dir>: remove dangling links that point into this
         [[ "$(realpath -m "$(dirname "$t")/$(readlink "$t")")" == "$ROOT"/* ]] || continue
         rm -f "$t"
         del "dead link $(short "$t")"
-    done < <(find "$1" "$HOME_T/.zshrc" "$HOME_T/.gtkrc-2.0" "$HOME_T/.Xresources" -xtype l -print0 2>/dev/null)
+    done < <(find "$1" "$HOME_T/.bashrc" "$HOME_T/.gtkrc-2.0" "$HOME_T/.Xresources" -xtype l -print0 2>/dev/null)
     find "$1" -depth -type d -empty -delete 2>/dev/null || true
 }
 
@@ -284,8 +284,26 @@ EOF
         grep -v '^FONT=' "$vc" 2>/dev/null || true
         echo "FONT=comicshanns"
     )"
-    if ((dirty)) && live; then sudo systemctl restart systemd-vconsole-setup &>/dev/null || true; fi
-    rebuild
+    if ((dirty)) && live; then _apply_tty_font; fi
+    rebuild # both ramfs flavours (sd-vconsole / consolefont) read vconsole.conf
+
+    # The GPU driver's fbcon takeover after the initramfs resets the font; udev (systemd-udevd or eudev,
+    # whatever the init) re-applies it to every allocated VT. New VTs inherit it from the foreground one.
+    local was=$dirty
+    dirty=0
+    write "$(tpath /etc/udev/rules.d/91-astralia-font.rules)" <<'EOF'
+ACTION=="add", SUBSYSTEM=="vtconsole", KERNEL=="vtcon*", RUN+="/bin/sh -c 'for v in /dev/vcs[1-9]*; do [ -e $$v ] && /usr/bin/setfont -C /dev/tty$${v#/dev/vcs} comicshanns; done; true'"
+EOF
+    if ((dirty)) && live && has udevadm; then sudo udevadm control --reload; fi
+    dirty=$((dirty | was))
+}
+
+_apply_tty_font() { # load the font on every allocated VT now, without any init service
+    local vcs
+    for vcs in /dev/vcs[1-9]*; do # vcsN exists only for allocated VTs, so no new ones get opened
+        [[ -e $vcs ]] || continue
+        sudo setfont -C "/dev/tty${vcs#/dev/vcs}" comicshanns &>/dev/null || true
+    done
 }
 
 update_cursor() {
@@ -394,65 +412,30 @@ EOF
     if ((dirty)) && live; then note "zram changes apply on next boot"; fi
 }
 
-update_splash() {
-    _install "$THEMES/splash/splash.bmp" "$(tpath /usr/share/systemd/bootctl/splash-arch.bmp)"
-    rebuild
-}
-
-update_plymouth() {
-    if ! has plymouth-set-default-theme; then
-        skip "plymouth not installed"
-        return 0
-    fi
-    local dst
-    dst=$(tpath "/usr/share/plymouth/themes/$THEME")
-    if ((remove)); then
-        if [[ -d "$dst" ]]; then
-            sudoc rm -rf "$dst"
-            del "$dst"
-            dirty=1
-        fi
-    else
-        req_dir "$THEMES/plymouth/$THEME"
-        _copy_dir "$THEMES/plymouth/$THEME" "$dst"
-        if live && [[ "$(plymouth-set-default-theme)" != "$THEME" ]]; then
-            quiet "setting default theme" sudo plymouth-set-default-theme "$THEME"
-            dirty=1
-        fi
-        if live; then
-            sudo systemctl enable plymouth-{start,quit-wait,quit,poweroff,reboot,halt,kexec}.service &>/dev/null || true
-        fi
-    fi
-    rebuild
-}
-
-update_cmdline() {
-    _detect_gpu
-    local args fs
-    args=$(<"$ROOT/system/cmdline")
-    fs=$(findmnt -no FSTYPE -T "$TARGET")
-    if [[ -n "$fs" ]]; then args+=" rootfstype=$fs"; fi
-    if $has_nvidia; then args+=" nvidia_drm.modeset=1"; fi
-    if $has_intel && ! $has_intel_xe; then args+=" i915.fastboot=1"; fi
-    write "$(tpath /etc/kernel/cmdline)" <<<"$args"
-    rebuild
-}
-
 update_ramfs() {
     _detect_gpu
     _detect_cpu
-    local mods=() hooks=(base systemd) nvidia_only=false
+    local mods=() hooks=() nvidia_only=false sd_ramfs=true
+    # Keep the ramfs flavour already configured (RAMFS_INIT=systemd|busybox overrides); systemd by default.
+    case ${RAMFS_INIT:-} in
+    systemd) ;;
+    busybox) sd_ramfs=false ;;
+    "") if grep -qE '^HOOKS=\(.*\budev\b' "$(tpath /etc/mkinitcpio.conf)" 2>/dev/null; then sd_ramfs=false; fi ;;
+    *) die "RAMFS_INIT must be systemd or busybox" ;;
+    esac
+    if $sd_ramfs; then hooks=(base systemd); else hooks=(base udev); fi
     $has_nvidia && mods+=(nvidia nvidia_modeset nvidia_uvm nvidia_drm)
     $has_amd && mods+=(amdgpu)
     if $has_intel_xe; then mods+=(xe); elif $has_intel; then mods+=(i915); fi
     $has_nvidia && ! $has_amd && ! $has_intel && nvidia_only=true
 
-    if has plymouth-set-default-theme; then hooks+=(plymouth plymouth-shutdown); fi
     hooks+=(autodetect microcode modconf)
     $nvidia_only || hooks+=(kms) # the kms hook breaks nvidia-only boot
-    hooks+=(keyboard sd-vconsole block filesystems fsck)
+    hooks+=(keyboard)
+    if $sd_ramfs; then hooks+=(sd-vconsole); else hooks+=(keymap consolefont); fi
+    hooks+=(block filesystems fsck)
 
-    note "gpu modules: ${mods[*]:-none}"
+    note "ramfs init: $($sd_ramfs && echo systemd || echo busybox), gpu modules: ${mods[*]:-none}"
     if live && [[ -n "$cpu_ucode" ]] && ! pacman -Q "$cpu_ucode" &>/dev/null; then
         warn "$cpu_ucode is not installed, so the microcode hook does nothing"
     fi
@@ -463,6 +446,15 @@ MODULES=(${mods[*]})
 HOOKS=(${hooks[*]})
 
 COMPRESSION="zstd"
+EOF
+
+    # Traditional kernel + initramfs pair for grub's 10_linux, no UKI.
+    write "$(tpath /etc/mkinitcpio.d/linux.preset)" <<'EOF'
+ALL_kver="/boot/vmlinuz-linux"
+
+PRESETS=('default')
+
+default_image="/boot/initramfs-linux.img"
 EOF
 
     # Under `all`, rebuild only when something changed; `update ramfs` always rebuilds.
@@ -482,16 +474,25 @@ update_grub() {
             del "$dst"
         fi
     else
-        [[ "$arg" =~ ^[0-9]+x[0-9]+$ ]] || die "grub: expected <WxH> or --remove"
-        req_dir "$THEMES/grub/${THEME}_$arg"
-        _install "$THEMES/grub/grub" "$(tpath /etc/default/grub)"
-        _copy_dir "$THEMES/grub/${THEME}_$arg" "$dst"
+        req_dir "$THEMES/grub/$THEME"
+        _detect_gpu
+        local args fs
+        args=$(<"$ROOT/system/cmdline")
+        fs=$(findmnt -no FSTYPE -T "$TARGET")
+        if [[ -n "$fs" ]]; then args+=" rootfstype=$fs"; fi
+        if $has_nvidia; then args+=" nvidia_drm.modeset=1"; fi
+        if $has_intel && ! $has_intel_xe; then args+=" i915.fastboot=1"; fi
+        write "$(tpath /etc/default/grub)" <<<"$(
+            cat "$THEMES/grub/grub"
+            printf '\nGRUB_CMDLINE_LINUX_DEFAULT=""\n\nGRUB_CMDLINE_LINUX="%s"\n' "$args"
+        )"
+        _copy_dir "$THEMES/grub/$THEME" "$dst"
     fi
     if live; then quiet "grub-mkconfig" sudo grub-mkconfig -o /boot/grub/grub.cfg; fi
 }
 
 update_symlinks() {
-    local dirs=(/usr/bin /usr/local/bin /usr/share/applications "$HOME_T/.config" "$HOME_T/.zshrc" "$HOME_T/.gtkrc-2.0")
+    local dirs=(/usr/bin /usr/local/bin /usr/share/applications "$HOME_T/.config" "$HOME_T/.bashrc" "$HOME_T/.gtkrc-2.0")
     local all_broken=() dir broken depth reply
     for dir in "${dirs[@]}"; do
         depth=(-maxdepth 1)
@@ -533,7 +534,7 @@ update_all() {
 run() { # <module>
     current=$1 dirty=0
     if [[ "$1" != all ]]; then
-        if [[ "$1" =~ ^(stow|grub)$ && -n "$arg" ]]; then header "$1 ($arg)"; else header "$1"; fi
+        if [[ "$1" == stow && -n "$arg" ]]; then header "$1 ($arg)"; else header "$1"; fi
     fi
     "update_$1"
 }
@@ -557,16 +558,13 @@ Modules:
   yazi                install and upgrade yazi plugins
   zen                 link Zen userChrome.css, user.js, palette [--remove]
   zram                zram swap config
-  splash              boot splash image
-  plymouth            plymouth theme                          [--remove]
-  cmdline             kernel cmdline (+ root fs and GPU options)
-  ramfs               mkinitcpio.conf for this GPU, then rebuild the initramfs
-  grub <WxH>          grub theme for a screen resolution      [--remove]
+  ramfs               mkinitcpio.conf + preset for this GPU, then rebuild the initramfs
+  grub                grub config, kernel cmdline, $THEME theme (1080p) [--remove]
   symlinks            find broken symlinks and offer to remove them
 
 Flags:
   --remove        undo the module
-  --no-rebuild    don't rebuild the initramfs (font, splash, plymouth, cmdline)
+  --no-rebuild    don't rebuild the initramfs (font)
 
 Environment:
   UPDATE_TARGET_ROOT  root for system files (default /)
@@ -588,7 +586,7 @@ while (($#)); do
     --no-rebuild) norebuild=1 ;;
     -*) die "unknown flag: $1" ;;
     *)
-        [[ -z "$arg" && "$mod" =~ ^(stow|grub)$ ]] || die "too many args"
+        [[ -z "$arg" && "$mod" == stow ]] || die "too many args"
         arg=$1
         ;;
     esac

@@ -10,10 +10,10 @@ SESSION_CMD="${1:-start-hyprland}"
 TARGET_USER="$SUDO_USER"
 TARGET_HOME=$(getent passwd "$TARGET_USER" | cut -d: -f6)
 
-# zsh (installed by CORE_PKGS)
-ZSH_PATH=$(command -v zsh)
-grep -qF "$ZSH_PATH" /etc/shells || echo "$ZSH_PATH" >>/etc/shells
-[[ "$(getent passwd "$TARGET_USER" | cut -d: -f7)" == "$ZSH_PATH" ]] || chsh -s "$ZSH_PATH" "$TARGET_USER"
+# bash login shell
+SHELL_PATH=$(command -v bash)
+grep -qF "$SHELL_PATH" /etc/shells || echo "$SHELL_PATH" >>/etc/shells
+[[ "$(getent passwd "$TARGET_USER" | cut -d: -f7)" == "$SHELL_PATH" ]] || chsh -s "$SHELL_PATH" "$TARGET_USER"
 
 # greetd
 if ! command -v greetd &>/dev/null; then
@@ -35,7 +35,7 @@ cat <<EOF >/etc/greetd/config.toml
 vt = 1
 
 [default_session]
-command = "agreety --cmd $ZSH_PATH"
+command = "agreety --cmd $SHELL_PATH"
 user = "greeter"
 
 [initial_session]

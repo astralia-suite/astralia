@@ -6,10 +6,6 @@ GRUB_TIMEOUT=5
 
 GRUB_DISTRIBUTOR="Arch"
 
-GRUB_CMDLINE_LINUX_DEFAULT="fbcon=nodefer plymouth.ignore-serial-consoles rd.systemd.show_status=auto rd.udev.log_level=3 quiet splash loglevel=3 udev.log-priority=3 nvidia_drm.modeset=1 i915.fastboot=1 vt.handoff=7"
-
-GRUB_CMDLINE_LINUX="zswap.enabled=0 rootfstype=ext4"
-
 GRUB_PRELOAD_MODULES="part_gpt part_msdos"
 
 GRUB_TIMEOUT_STYLE=menu
@@ -26,6 +22,8 @@ GRUB_DISABLE_RECOVERY=true
 
 GRUB_THEME="/boot/grub/themes/Keqing/theme.txt"
 
-GRUB_DISABLE_OS_PROBER=false
+GRUB_DISABLE_OS_PROBER=true
+
+GRUB_DISABLE_BOOTNEXT=true
 
 GRUB_RECORDFAIL_TIMEOUT=0

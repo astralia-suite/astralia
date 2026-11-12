@@ -5,11 +5,9 @@ CORE_PKGS=(
     stow
     upower
     zram-generator
-    zsh
 )
 
 SESSION_PKGS=(
-    plymouth
     xdg-desktop-portal
     xdg-utils
 )
@@ -70,7 +68,7 @@ CLI_PKGS=(
     xxhash
     yazi
     zoxide
-    zsh-autosuggestions
+    bash-completion
 )
 
 DEV_PKGS=(
@@ -81,5 +79,6 @@ DEV_PKGS=(
 
 AUR_PKGS=(
     visual-studio-code-bin
+    blesh
     zen-browser-bin
 )

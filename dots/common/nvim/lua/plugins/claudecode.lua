@@ -1,4 +1,4 @@
--- Not on PATH outside interactive zsh
+-- Not on PATH outside interactive shells
 local claude_bin = vim.fn.expand("~/.local/bin/claude")
 
 local function gated(cmd)
