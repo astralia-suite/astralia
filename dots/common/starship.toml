@@ -1,5 +1,5 @@
 format = """
-$time $directory
+$conda$time $directory
 [Come on. Enough procrastinating. Let's go.](yellow)
 $cmd_duration$character
 """
@@ -15,6 +15,9 @@ time_format = "%d-%m-%Y %H:%M:%S"
 format = "[$path]()"
 truncation_length = 1
 truncate_to_repo = false
+
+[conda]
+format = "[\\($environment\\)](green) "
 
 [cmd_duration]
 min_time = 2000
