@@ -192,23 +192,6 @@ for _, rule in ipairs({
 	hl.window_rule(rule)
 end
 
--- Re-center floating windows that place themselves off every monitor (Wine/Steam launchers restore stale coords).
-local function rescue_offscreen(win)
-	if not (win and win.floating and win.at and win.size) then
-		return
-	end
-	local cx, cy = win.at.x + win.size.x / 2, win.at.y + win.size.y / 2
-	for _, m in ipairs(hl.get_monitors()) do
-		if cx >= m.x and cx < m.x + m.width and cy >= m.y and cy < m.y + m.height then
-			return
-		end
-	end
-	hl.dispatch(hl.dsp.window.center({ window = "address:" .. win.address }))
-end
-for _, ev in ipairs({ "window.open", "window.title", "window.active" }) do
-	hl.on(ev, rescue_offscreen)
-end
-
 -- ===========
 -- KEYBINDINGS
 -- ===========
