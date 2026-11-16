@@ -124,5 +124,6 @@
     "workbench.welcomePage.walkthroughs.openOnInstall": false,
     "animations.Enabled": true,
     "workbench.iconTheme": "symbols",
-    "claudeCode.hideOnboarding": true
+    "claudeCode.hideOnboarding": true,
+    "jupyter.askForKernelRestart": false
 }
