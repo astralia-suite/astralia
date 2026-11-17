@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# Print remaining battery level as a float (0-100, two decimals).
+# Sums all batteries; prefers energy_* (µWh), falls back to charge_* (µAh), then capacity (%).
+
+set -euo pipefail
+
+readonly POWER_SUPPLY_DIR="/sys/class/power_supply"
+
+now=0
+full=0
+cap_sum=0
+cap_count=0
+
+# Print an error to stderr and exit.
+_die() { echo "get-batt: $*" >&2; exit 1; }
+
+# True if both given files are readable.
+_has_pair() { [[ -r "$1" && -r "$2" ]] }
+
+# Add one battery's now/full readings to the running totals.
+_add_reading() {
+    local now_file="$1" full_file="$2"
+    now=$((now + $(<"$now_file")))
+    full=$((full + $(<"$full_file")))
+}
+
+# Add one battery's integer capacity (%) to the fallback totals.
+_add_capacity() {
+    cap_sum=$((cap_sum + $(<"$1")))
+    cap_count=$((cap_count + 1))
+}
+
+# Read a single battery directory using the most precise source available.
+_read_battery() {
+    local bat="$1"
+    if _has_pair "$bat/energy_now" "$bat/energy_full"; then
+        _add_reading "$bat/energy_now" "$bat/energy_full"
+    elif _has_pair "$bat/charge_now" "$bat/charge_full"; then
+        _add_reading "$bat/charge_now" "$bat/charge_full"
+    elif [[ -r "$bat/capacity" ]]; then
+        _add_capacity "$bat/capacity"
+    fi
+}
+
+# Collect readings from every battery on the system.
+_collect_batteries() {
+    local bat
+    for bat in "$POWER_SUPPLY_DIR"/BAT*; do
+        [[ -d "$bat" ]] && _read_battery "$bat"
+    done
+    return 0
+}
+
+# Print now/full as a percentage clamped to 0-100.
+_print_ratio() {
+    awk -v n="$1" -v f="$2" 'BEGIN {
+        p = n / f * 100
+        if (p > 100) p = 100
+        if (p < 0) p = 0
+        printf "%.2f\n", p
+    }'
+}
+
+# Print the average of summed capacities.
+_print_average() {
+    awk -v s="$1" -v c="$2" 'BEGIN { printf "%.2f\n", s / c }'
+}
+
+main() {
+    _collect_batteries
+    if ((full > 0)); then
+        _print_ratio "$now" "$full"
+    elif ((cap_count > 0)); then
+        _print_average "$cap_sum" "$cap_count"
+    else
+        _die "no battery found"
+    fi
+}
+
+main "$@"
