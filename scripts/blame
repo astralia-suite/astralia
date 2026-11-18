@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# blame: find and sort directories by size (largest first).
+# Usage: blame [dir] [depth] [count]
+#   dir    directory to scan (default: current directory)
+#   depth  directory depth below dir to report (default: 1)
+#   count  number of entries to show (default: 20)
+set -euo pipefail
+
+root="${1:-$PWD}"
+depth="${2:-1}"
+count="${3:-20}"
+
+if ! [[ "$depth" =~ ^[0-9]+$ && "$count" =~ ^[0-9]+$ ]]; then
+  echo "usage: blame [dir] [depth] [count]" >&2
+  exit 1
+fi
+
+if [[ ! -d "$root" ]]; then
+  echo "blame: not a directory: $root" >&2
+  exit 1
+fi
+
+out="$(du -B1 --max-depth="$depth" -- "$root" 2>/dev/null || true)"
+
+# Format byte counts in binary units (KiB, MiB, GiB, ...).
+iec() { numfmt --to=iec-i --suffix=B --field=1 -d $'\t'; }
+
+# du prints the scanned directory itself as its last line.
+total="$(tail -n 1 <<<"$out" | cut -f1 | iec)"
+echo "Current directory: $root ($total)"
+echo
+# Show entries relative to the scanned directory.
+relative() {
+  awk -F'\t' -v p="${root%/}/" 'BEGIN { OFS = "\t" }
+    index($2, p) == 1 { $2 = substr($2, length(p) + 1) } { print }'
+}
+
+head -n -1 <<<"$out" | sort -rn | head -n "$count" | relative | iec || true
